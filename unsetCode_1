@@ -1,0 +1,39 @@
+= () => let
+// Part 1 - Number of audit logs
+iterations = Json.Document(Web.Contents("https://bi.decisionrules.io/audit?bi_key=" & BI_API_KEY & "&rules=" & RULE_ID & "&limit=1"))[matchedCount],
+
+// Part 2 - Loading function
+FnGetOnePage =
+(Page)  =>
+let
+Source = Json.Document(Web.Contents("https://bi.decisionrules.io/audit?bi_key=" & BI_API_KEY & "&rules=" & RULE_ID & "&page_size=1&page="&Number.ToText(Page)))[audits]
+in
+Source,
+
+// Part 3 - Get all available logs into one table
+GeneratedList =
+List.Generate(
+	()=>[i=1, res = FnGetOnePage(i)],
+	each [i]<=iterations,
+	each [i=[i]+1, res = FnGetOnePage(i)],
+	each [res]),
+
+// Part 4 - Get data from audit logs (Agnostic to changes in output structure)
+	#"Converted to Table" = Table.FromList(GeneratedList, Splitter.SplitByNothing(), null, null, ExtraValues.Error),
+    	#"Expanded Column1" = Table.ExpandListColumn(#"Converted to Table", "Column1"),
+    	#"Expanded Column2" = Table.ExpandRecordColumn(#"Expanded Column1", "Column1", {"outputData"}, {"Column1.outputData"}),
+    	#"Expanded Column1.outputData" = Table.ExpandListColumn(#"Expanded Column2", "Column1.outputData"),
+    	#"Expand Lists" = Table.AddColumn(#"Expanded Column1.outputData","Rec", each if Value.Is([Column1.outputData], type record) then [Column1.outputData] else List.Single([Column1.outputData]), type record),
+        #"Remove column" = Table.RemoveColumns(#"Expand Lists", {"Column1.outputData"}),
+
+// Part 5 - Get data from audit logs (Depends on the output structure)
+       #"Expanded Column1.outputData2" = Table.ExpandRecordColumn(#"Remove column", "Rec", {"issueDate", "branch", "consultantId", "commissions"}, {"issueDate", "branch", "consultantId", "commissions"}),
+        #"Expanded commissions" = Table.ExpandListColumn(#"Expanded Column1.outputData2", "commissions"),
+        #"Expanded commissions1" = Table.ExpandRecordColumn(#"Expanded commissions", "commissions", {"accountId", "productType", "commissions"}, {"accountId", "productType", "commissions.1"}),
+        #"Expanded commissions.1" = Table.ExpandListColumn(#"Expanded commissions1", "commissions.1"),
+        #"Expanded commissions.2" = Table.ExpandRecordColumn(#"Expanded commissions.1", "commissions.1", {"awarded", "commission"}, {"awarded", "commission"}),
+        #"Expanded commission" = Table.ExpandRecordColumn(#"Expanded commissions.2", "commission", {"type", "name", "value", "reasoning"}, {"type", "name", "value", "reasoning"})
+
+    in
+
+        #"Expanded commission"
